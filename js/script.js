@@ -97,6 +97,375 @@ let map;
 let markers = [];
 let drawnItems;
 let measuringMode = false;
+// ============================================
+// Sistema de notificações (toasts)
+// ============================================
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+        color: white;
+        padding: 12px 24px;
+        border-radius: 50px;
+        font-weight: 500;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 9999;
+        opacity: 0;
+        transform: translateY(20px);
+        transition: opacity 0.3s, transform 0.3s;
+    `;
+    document.body.appendChild(toast);
+    
+    // Forçar reflow
+    toast.offsetHeight;
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+    
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(20px)';
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// Substituir alerts existentes
+// Exemplo: onde tem alert('...'), substituir por showToast('...', 'success/info/error')
+
+// ============================================
+// Importação CSV
+// ============================================
+function importCSV() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const csv = event.target.result;
+            parseCSV(csv);
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
+function parseCSV(csv) {
+    const lines = csv.split('\n').filter(line => line.trim() !== '');
+    if (lines.length < 2) {
+        showToast('Arquivo CSV vazio ou inválido', 'error');
+        return;
+    }
+    
+    const header = lines[0].split(',').map(s => s.trim());
+    // Formato esperado: Nome,Lat,Lng,Preco,Area,Localizacao,Topografia,Solo,Potencial,Infra
+    // ou genérico: primeiro campo = nome do terreno, depois lat, lng, e então valores para cada critério na ordem atual
+    
+    // Vamos usar um formato flexível: a primeira linha deve conter os nomes dos critérios (exceto as 3 primeiras colunas: Nome,Lat,Lng)
+    const criteriaNames = header.slice(3); // a partir da quarta coluna
+    // Verificar se os critérios atuais correspondem
+    if (criteriaNames.length !== criteria.length) {
+        showToast('Número de colunas não corresponde ao número de critérios', 'error');
+        return;
+    }
+    
+    // Criar novos terrenos
+    const newTerrains = [];
+    const newRawValues = {};
+    const newScores = {};
+    
+    // Inicializar estruturas para novos valores
+    criteria.forEach(c => {
+        newRawValues[c.id] = {};
+        newScores[c.id] = {};
+    });
+    
+    for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(s => s.trim());
+        if (cols.length < 3) continue;
+        
+        const name = cols[0];
+        const lat = parseFloat(cols[1]);
+        const lng = parseFloat(cols[2]);
+        if (isNaN(lat) || isNaN(lng)) {
+            showToast(`Linha ${i+1}: coordenadas inválidas`, 'error');
+            continue;
+        }
+        
+        const terrainId = generateId('t');
+        newTerrains.push({ id: terrainId, name, lat, lng });
+        
+        // Processar valores dos critérios
+        for (let j = 0; j < criteria.length; j++) {
+            const val = parseFloat(cols[3 + j]);
+            if (isNaN(val)) continue;
+            
+            const c = criteria[j];
+            if (c.norm.mode === 'raw') {
+                newRawValues[c.id][terrainId] = val;
+                // Nota será calculada depois
+            } else {
+                // Se for manual, o valor deve ser nota 0-10
+                newScores[c.id][terrainId] = Math.min(10, Math.max(0, val));
+                newRawValues[c.id][terrainId] = 0;
+            }
+        }
+    }
+    
+    if (newTerrains.length === 0) {
+        showToast('Nenhum terreno válido encontrado', 'error');
+        return;
+    }
+    
+    // Substituir dados atuais
+    terrains = newTerrains;
+    
+    // Inicializar scores e rawValues para todos os critérios com valores padrão onde não foram preenchidos
+    criteria.forEach(c => {
+        terrains.forEach(t => {
+            if (newRawValues[c.id] && newRawValues[c.id][t.id] !== undefined) {
+                // já tem valor bruto
+            } else {
+                newRawValues[c.id][t.id] = 0;
+            }
+            if (newScores[c.id] && newScores[c.id][t.id] !== undefined) {
+                // já tem nota manual
+            } else {
+                newScores[c.id][t.id] = 5;
+            }
+        });
+    });
+    
+    rawValues = newRawValues;
+    scores = newScores;
+    
+    // Recalcular notas dos critérios raw
+    criteria.forEach(c => {
+        if (c.norm.mode === 'raw') recalcNorm(c.id);
+    });
+    
+    updateAll();
+    if (map) updateMapMarkers();
+    showToast(`${newTerrains.length} terrenos importados com sucesso!`, 'success');
+}
+
+// Botão de importação
+const importCsvBtn = document.createElement('button');
+importCsvBtn.id = 'import-csv';
+importCsvBtn.className = 'btn btn-secondary';
+importCsvBtn.innerHTML = '<i data-feather="upload-cloud"></i> Importar CSV';
+importCsvBtn.addEventListener('click', importCSV);
+document.querySelector('.export-buttons').appendChild(importCsvBtn);
+
+
+// ============================================
+// Gráfico de contribuição (barras empilhadas)
+// ============================================
+let contributionChart;
+
+function showContributionChart() {
+    if (contributionChart) contributionChart.destroy();
+    
+    const ctx = document.getElementById('contribution-chart');
+    if (!ctx) {
+        // Criar canvas se não existir
+        const canvas = document.createElement('canvas');
+        canvas.id = 'contribution-chart';
+        canvas.width = 400;
+        canvas.height = 300;
+        document.querySelector('.charts').appendChild(canvas);
+    }
+    
+    const labels = terrains.map(t => t.name);
+    const datasets = criteria.map((c, idx) => ({
+        label: c.name,
+        data: terrains.map(t => (scores[c.id][t.id] || 0) * (c.weight / 100)),
+        backgroundColor: `hsl(${idx * 30}, 70%, 60%)`,
+    }));
+    
+    contributionChart = new Chart(document.getElementById('contribution-chart'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Contribuição de cada critério para a pontuação final'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => {
+                            const label = context.dataset.label || '';
+                            const value = context.raw.toFixed(2);
+                            return `${label}: ${value} pontos`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: { stacked: true },
+                y: { stacked: true, beginAtZero: true, max: 10 }
+            }
+        }
+    });
+}
+
+// Botão para mostrar gráfico de contribuição
+const contribBtn = document.createElement('button');
+contribBtn.id = 'show-contribution';
+contribBtn.className = 'btn btn-secondary';
+contribBtn.innerHTML = '<i data-feather="bar-chart-2"></i> Contribuição';
+contribBtn.addEventListener('click', () => {
+    showContributionChart();
+    // Rolar até o gráfico
+    document.getElementById('contribution-chart').scrollIntoView({ behavior: 'smooth' });
+});
+document.querySelector('.export-buttons').appendChild(contribBtn);
+
+
+// ============================================
+// Links compartilháveis
+// ============================================
+function getStateString() {
+    const state = {
+        criteria: criteria.map(c => ({
+            id: c.id,
+            name: c.name,
+            weight: c.weight,
+            norm: c.norm
+        })),
+        terrains: terrains.map(t => ({
+            id: t.id,
+            name: t.name,
+            lat: t.lat,
+            lng: t.lng
+        })),
+        scores: scores,
+        rawValues: rawValues
+    };
+    const json = JSON.stringify(state);
+    return btoa(encodeURIComponent(json)); // Base64 seguro para URL
+}
+
+function loadStateFromString(encoded) {
+    try {
+        const json = decodeURIComponent(atob(encoded));
+        const state = JSON.parse(json);
+        
+        criteria = state.criteria;
+        terrains = state.terrains;
+        scores = state.scores;
+        rawValues = state.rawValues;
+        
+        updateAll();
+        if (map) updateMapMarkers();
+        showToast('Simulação carregada do link!', 'success');
+    } catch (e) {
+        showToast('Link inválido ou corrompido', 'error');
+    }
+}
+
+function shareSimulation() {
+    const stateStr = getStateString();
+    const url = new URL(window.location);
+    url.searchParams.set('state', stateStr);
+    navigator.clipboard.writeText(url.toString()).then(() => {
+        showToast('Link copiado para a área de transferência!', 'success');
+    }).catch(() => {
+        showToast('Erro ao copiar link', 'error');
+    });
+}
+
+// Verificar se há parâmetro 'state' na URL ao carregar
+window.addEventListener('load', () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const stateParam = urlParams.get('state');
+    if (stateParam) {
+        loadStateFromString(stateParam);
+    }
+});
+
+// Botão de compartilhar
+const shareBtn = document.createElement('button');
+shareBtn.id = 'share-simulation';
+shareBtn.className = 'btn btn-secondary';
+shareBtn.innerHTML = '<i data-feather="share-2"></i> Compartilhar';
+shareBtn.addEventListener('click', shareSimulation);
+document.querySelector('.export-buttons').appendChild(shareBtn);
+
+
+// ============================================
+// Exportar/importar JSON
+// ============================================
+function exportJSON() {
+    const state = {
+        criteria: criteria,
+        terrains: terrains,
+        scores: scores,
+        rawValues: rawValues
+    };
+    const json = JSON.stringify(state, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `terrenos_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function importJSON() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const state = JSON.parse(event.target.result);
+                criteria = state.criteria;
+                terrains = state.terrains;
+                scores = state.scores;
+                rawValues = state.rawValues;
+                updateAll();
+                if (map) updateMapMarkers();
+                showToast('Simulação carregada com sucesso!', 'success');
+            } catch (err) {
+                showToast('Arquivo JSON inválido', 'error');
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
+// Botões
+const exportJsonBtn = document.createElement('button');
+exportJsonBtn.id = 'export-json';
+exportJsonBtn.className = 'btn btn-secondary';
+exportJsonBtn.innerHTML = '<i data-feather="download"></i> JSON';
+exportJsonBtn.addEventListener('click', exportJSON);
+
+const importJsonBtn = document.createElement('button');
+importJsonBtn.id = 'import-json';
+importJsonBtn.className = 'btn btn-secondary';
+importJsonBtn.innerHTML = '<i data-feather="upload"></i> JSON';
+importJsonBtn.addEventListener('click', importJSON);
+
+document.querySelector('.export-buttons').appendChild(exportJsonBtn);
+document.querySelector('.export-buttons').appendChild(importJsonBtn);
+
 
 // ============================================
 // Utilitários
