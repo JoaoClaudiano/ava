@@ -13,13 +13,21 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <!-- SheetJS (XLSX) -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-    <!-- html2canvas e jsPDF (opcional) -->
+    <!-- html2canvas e jsPDF (para PDF) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
     <!-- Intro.js para tour -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intro.js@5.1.0/minified/introjs.min.css">
     <script src="https://cdn.jsdelivr.net/npm/intro.js@5.1.0/minified/intro.min.js"></script>
+    <!-- Leaflet para mapas -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet.draw para ferramentas de desenho -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <!-- Leaflet.geometryutil (opcional) -->
+    <script src="https://unpkg.com/leaflet-geometryutil@0.10.3/src/leaflet.geometryutil.js"></script>
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css">
@@ -32,60 +40,135 @@
             <button id="start-tour" class="btn btn-secondary" style="margin-top: 0.5rem;" title="Tour guiado"><i data-feather="compass"></i> Tour</button>
         </header>
 
-        <!-- Simulador principal -->
-        <section class="simulator">
-            <h2><i data-feather="map-pin"></i> Avaliador de Terrenos</h2>
-            <p class="simulator-intro">Adicione terrenos, defina critérios e insira valores. Notas são calculadas automaticamente.</p>
+        <!-- Abas -->
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-learn"><i data-feather="book-open"></i> Aprender</button>
+            <button class="tab-btn" id="tab-simulator"><i data-feather="tool"></i> Simulador</button>
+            <button class="tab-btn" id="tab-map"><i data-feather="map"></i> Mapa</button>
+            <button class="tab-btn" id="tab-examples"><i data-feather="folder"></i> Exemplos</button>
+        </div>
 
-            <!-- Painel de terrenos -->
-            <div class="manager-panel">
-                <h3><i data-feather="map"></i> Terrenos</h3>
-                <div id="terrains-list" class="dynamic-list"></div>
-                <button id="add-terrain" class="btn btn-secondary"><i data-feather="plus"></i> Adicionar terreno</button>
-            </div>
-
-            <!-- Painel de critérios (com botões de normalização) -->
-            <div class="manager-panel">
-                <h3><i data-feather="list"></i> Critérios</h3>
-                <div id="criteria-list" class="dynamic-list"></div>
-                <button id="add-criterion" class="btn btn-secondary"><i data-feather="plus"></i> Adicionar critério</button>
-            </div>
-
-            <!-- Aviso de soma dos pesos -->
-            <div id="weight-warning" class="warning hidden"></div>
-
-            <!-- Tabela de valores/notas -->
-            <div class="scores-panel">
-                <h3><i data-feather="edit-3"></i> Valores dos terrenos</h3>
-                <div class="scores-table-wrapper">
-                    <table id="scores-table">
-                        <thead id="scores-thead"></thead>
-                        <tbody id="scores-tbody"></tbody>
-                    </table>
+        <!-- Aba Aprender -->
+        <div id="learn-content" class="tab-content active">
+            <section class="learn-section">
+                <h2>Método da Pontuação Ponderada</h2>
+                <div class="card">
+                    <h3><i data-feather="scale"></i> Pesos</h3>
+                    <p>Defina a importância de cada critério. A soma deve ser 100%.</p>
                 </div>
-            </div>
-
-            <!-- Resultados -->
-            <div class="results-panel">
-                <h3><i data-feather="bar-chart-2"></i> Resultado da Ponderação</h3>
-                <div class="ranking">
-                    <h4><i data-feather="award"></i> Pontuação final</h4>
-                    <div id="ranking-list" class="ranking-list"></div>
+                <div class="card">
+                    <h3><i data-feather="star"></i> Notas</h3>
+                    <p>Para critérios manuais, atribua notas de 0 a 10. Para valores brutos (preço, distância), insira o valor real; a nota é calculada automaticamente.</p>
                 </div>
-                <div class="charts">
-                    <div class="chart-container">
-                        <canvas id="bar-chart"></canvas>
+                <div class="card">
+                    <h3><i data-feather="bar-chart-2"></i> Resultado</h3>
+                    <p>O terreno com maior pontuação é o mais adequado segundo seus critérios.</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- Aba Simulador -->
+        <div id="simulator-content" class="tab-content">
+            <section class="simulator">
+                <h2><i data-feather="tool"></i> Avaliador de Terrenos</h2>
+                <p class="simulator-intro">Adicione terrenos, defina critérios e insira valores. Notas são calculadas automaticamente.</p>
+
+                <!-- Painel de terrenos -->
+                <div class="manager-panel">
+                    <h3><i data-feather="map"></i> Terrenos</h3>
+                    <div id="terrains-list" class="dynamic-list"></div>
+                    <button id="add-terrain" class="btn btn-secondary"><i data-feather="plus"></i> Adicionar terreno</button>
+                </div>
+
+                <!-- Painel de critérios com botões de atalho -->
+                <div class="manager-panel">
+                    <h3><i data-feather="list"></i> Critérios</h3>
+                    <div id="criteria-list" class="dynamic-list"></div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                        <button id="add-criterion" class="btn btn-secondary"><i data-feather="plus"></i> Personalizado</button>
+                        <button id="add-distance-supplier" class="btn btn-secondary"><i data-feather="truck"></i> Dist. fornecedores</button>
+                        <button id="add-distance-urban" class="btn btn-secondary"><i data-feather="map-pin"></i> Dist. centros</button>
+                        <button id="add-access" class="btn btn-secondary"><i data-feather="navigation"></i> Acesso vias</button>
                     </div>
-                    <div class="chart-container">
-                        <canvas id="radar-chart"></canvas>
+                </div>
+
+                <!-- Aviso de soma dos pesos -->
+                <div id="weight-warning" class="warning hidden"></div>
+
+                <!-- Tabela de valores/notas -->
+                <div class="scores-panel">
+                    <h3><i data-feather="edit-3"></i> Valores dos terrenos</h3>
+                    <div class="scores-table-wrapper">
+                        <table id="scores-table">
+                            <thead id="scores-thead"></thead>
+                            <tbody id="scores-tbody"></tbody>
+                        </table>
                     </div>
                 </div>
-                <div class="export-buttons">
-                    <button id="export-pdf" class="btn btn-primary"><i data-feather="file-text"></i> PDF</button>
-                    <button id="export-xlsx" class="btn btn-primary"><i data-feather="file"></i> Excel</button>
+
+                <!-- Resultados -->
+                <div class="results-panel">
+                    <h3><i data-feather="bar-chart-2"></i> Resultado da Ponderação</h3>
+                    <div class="ranking">
+                        <h4><i data-feather="award"></i> Pontuação final</h4>
+                        <div id="ranking-list" class="ranking-list"></div>
+                    </div>
+                    <div class="charts">
+                        <div class="chart-container">
+                            <canvas id="bar-chart"></canvas>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="radar-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="export-buttons">
+                        <button id="export-pdf" class="btn btn-primary"><i data-feather="file-text"></i> PDF</button>
+                        <button id="export-xlsx" class="btn btn-primary"><i data-feather="file"></i> Excel</button>
+                    </div>
                 </div>
-            </div>
-        </section>
+            </section>
+        </div>
+
+        <!-- Aba Mapa -->
+        <div id="map-content" class="tab-content">
+            <section class="map-section">
+                <h2><i data-feather="map"></i> Visualização Geo-referenciada</h2>
+                <p class="map-intro">Clique nos marcadores para ver informações dos terrenos. Use as ferramentas para medir distâncias.</p>
+                
+                <div class="map-controls">
+                    <div class="search-box">
+                        <input type="text" id="address-search" placeholder="Buscar endereço...">
+                        <button id="search-btn" class="btn btn-secondary"><i data-feather="search"></i></button>
+                    </div>
+                    <button id="measure-distance" class="btn btn-secondary"><i data-feather="ruler"></i> Medir distância</button>
+                    <button id="clear-measurements" class="btn btn-secondary"><i data-feather="trash-2"></i> Limpar</button>
+                </div>
+                
+                <div id="map-container" style="height: 500px; width: 100%; border-radius: 1rem; margin-top: 1rem;"></div>
+                
+                <div id="distance-info" class="distance-panel hidden">
+                    <h4>Distância medida</h4>
+                    <p id="distance-value"></p>
+                </div>
+            </section>
+        </div>
+
+        <!-- Aba Exemplos -->
+        <div id="examples-content" class="tab-content">
+            <section class="examples-section">
+                <h2><i data-feather="folder"></i> Exemplos Práticos</h2>
+                <div class="card">
+                    <h3>Exemplo 1: Terrenos com preços diferentes</h3>
+                    <p>Carrega três terrenos com preços variados e critérios de localização.</p>
+                    <button id="load-example-1" class="btn btn-secondary"><i data-feather="upload"></i> Carregar</button>
+                </div>
+                <div class="card">
+                    <h3>Exemplo 2: Comparação com distâncias</h3>
+                    <p>Inclui critérios de distância até fornecedores e centros urbanos.</p>
+                    <button id="load-example-2" class="btn btn-secondary"><i data-feather="upload"></i> Carregar</button>
+                </div>
+            </section>
+        </div>
 
         <footer>
             <p>© 2026 PonderaCivil · Ferramenta para avaliação de terrenos</p>
