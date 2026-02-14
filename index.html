@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>PonderaCivil · Avaliação de Terrenos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <!-- Feather Icons -->
+    <script src="https://unpkg.com/feather-icons"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- SheetJS (XLSX) -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <!-- html2canvas e jsPDF (opcional) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
+    <!-- Intro.js para tour -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intro.js@5.1.0/minified/introjs.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/intro.js@5.1.0/minified/intro.min.js"></script>
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1><i data-feather="layers"></i> Pondera<span class="accent">Civil</span></h1>
+            <p class="subtitle">Análise técnica para compra de terrenos</p>
+            <button id="start-tour" class="btn btn-secondary" style="margin-top: 0.5rem;" title="Tour guiado"><i data-feather="compass"></i> Tour</button>
+        </header>
+
+        <!-- Simulador principal -->
+        <section class="simulator">
+            <h2><i data-feather="map-pin"></i> Avaliador de Terrenos</h2>
+            <p class="simulator-intro">Adicione terrenos, defina critérios e insira valores. Notas são calculadas automaticamente.</p>
+
+            <!-- Painel de terrenos -->
+            <div class="manager-panel">
+                <h3><i data-feather="map"></i> Terrenos</h3>
+                <div id="terrains-list" class="dynamic-list"></div>
+                <button id="add-terrain" class="btn btn-secondary"><i data-feather="plus"></i> Adicionar terreno</button>
+            </div>
+
+            <!-- Painel de critérios (com botões de normalização) -->
+            <div class="manager-panel">
+                <h3><i data-feather="list"></i> Critérios</h3>
+                <div id="criteria-list" class="dynamic-list"></div>
+                <button id="add-criterion" class="btn btn-secondary"><i data-feather="plus"></i> Adicionar critério</button>
+            </div>
+
+            <!-- Aviso de soma dos pesos -->
+            <div id="weight-warning" class="warning hidden"></div>
+
+            <!-- Tabela de valores/notas -->
+            <div class="scores-panel">
+                <h3><i data-feather="edit-3"></i> Valores dos terrenos</h3>
+                <div class="scores-table-wrapper">
+                    <table id="scores-table">
+                        <thead id="scores-thead"></thead>
+                        <tbody id="scores-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Resultados -->
+            <div class="results-panel">
+                <h3><i data-feather="bar-chart-2"></i> Resultado da Ponderação</h3>
+                <div class="ranking">
+                    <h4><i data-feather="award"></i> Pontuação final</h4>
+                    <div id="ranking-list" class="ranking-list"></div>
+                </div>
+                <div class="charts">
+                    <div class="chart-container">
+                        <canvas id="bar-chart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="radar-chart"></canvas>
+                    </div>
+                </div>
+                <div class="export-buttons">
+                    <button id="export-pdf" class="btn btn-primary"><i data-feather="file-text"></i> PDF</button>
+                    <button id="export-xlsx" class="btn btn-primary"><i data-feather="file"></i> Excel</button>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <p>© 2026 PonderaCivil · Ferramenta para avaliação de terrenos</p>
+        </footer>
+    </div>
+
+    <script src="js/script.js"></script>
+</body>
+</html>
