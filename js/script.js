@@ -862,7 +862,346 @@ function exportToXLSX() {
     
     XLSX.writeFile(wb, 'terrenos_analise.xlsx');
 }
+// ============================================
+// Persistência com localStorage
+// ============================================
+function saveSimulation() {
+    const state = {
+        criteria: criteria,
+        terrains: terrains,
+        scores: scores,
+        rawValues: rawValues
+    };
+    localStorage.setItem('ponderaCivilState', JSON.stringify(state));
+    alert('Simulação salva com sucesso!');
+}
 
+function loadSimulation() {
+    const saved = localStorage.getItem('ponderaCivilState');
+    if (!saved) {
+        alert('Nenhuma simulação salva encontrada.');
+        return;
+    }
+    try {
+        const state = JSON.parse(saved);
+        criteria = state.criteria;
+        terrains = state.terrains;
+        scores = state.scores;
+        rawValues = state.rawValues;
+        updateAll();
+        if (map) updateMapMarkers();
+        alert('Simulação carregada!');
+    } catch (e) {
+        alert('Erro ao carregar simulação.');
+    }
+}
+
+// Adicionar botões na interface (no results-panel, próximo aos botões de exportação)
+const saveBtn = document.createElement('button');
+saveBtn.id = 'save-simulation';
+saveBtn.className = 'btn btn-secondary';
+saveBtn.innerHTML = '<i data-feather="save"></i> Salvar';
+saveBtn.addEventListener('click', saveSimulation);
+
+const loadBtn = document.createElement('button');
+loadBtn.id = 'load-simulation';
+loadBtn.className = 'btn btn-secondary';
+loadBtn.innerHTML = '<i data-feather="upload"></i> Carregar';
+loadBtn.addEventListener('click', loadSimulation);
+
+const exportDiv = document.querySelector('.export-buttons');
+exportDiv.appendChild(saveBtn);
+exportDiv.appendChild(loadBtn);
+refreshFeather();
+
+// ============================================
+// Análise de sensibilidade
+// ============================================
+function sensitivityAnalysis() {
+    if (criteria.length === 0) {
+        alert('Adicione pelo menos um critério.');
+        return;
+    }
+    // Criar modal simples
+    const modal = document.createElement('div');
+    modal.style.position = 'fixed';
+    modal.style.top = '50%';
+    modal.style.left = '50%';
+    modal.style.transform = 'translate(-50%, -50%)';
+    modal.style.backgroundColor = 'white';
+    modal.style.padding = '2rem';
+    modal.style.borderRadius = '1.5rem';
+    modal.style.boxShadow = '0 20px 40px rgba(0,0,0,0.2)';
+    modal.style.zIndex = '1000';
+    modal.style.maxWidth = '90vw';
+    modal.style.maxHeight = '90vh';
+    modal.style.overflow = 'auto';
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '✕';
+    closeBtn.style.position = 'absolute';
+    closeBtn.style.top = '1rem';
+    closeBtn.style.right = '1rem';
+    closeBtn.style.background = 'none';
+    closeBtn.style.border = 'none';
+    closeBtn.style.fontSize = '1.5rem';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.onclick = () => document.body.removeChild(modal);
+    
+    const title = document.createElement('h3');
+    title.innerHTML = '<i data-feather="trending-up"></i> Análise de sensibilidade';
+    title.style.marginBottom = '1rem';
+    
+    const canvas = document.createElement('canvas');
+    canvas.id = 'sensitivity-chart';
+    canvas.width = 600;
+    canvas.height = 400;
+    
+    modal.appendChild(closeBtn);
+    modal.appendChild(title);
+    modal.appendChild(canvas);
+    document.body.appendChild(modal);
+    refreshFeather();
+    
+    // Calcular cenários: para cada critério, simular +10% e -10% no peso, redistribuindo
+    const baseScores = calculateFinalScores();
+    const baseValues = terrains.map(t => baseScores[t.id].score);
+    const labels = terrains.map(t => t.name);
+    
+    const datasets = [];
+    const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
+    
+    // Cenário base
+    datasets.push({
+        label: 'Base',
+        data: baseValues,
+        backgroundColor: 'rgba(59, 130, 246, 0.5)'
+    });
+    
+    criteria.forEach((c, idx) => {
+        // +10% no peso deste critério
+        const newWeights = criteria.map(crit => crit.weight);
+        const delta = Math.min(10, 100 - newWeights[idx]); // não ultrapassar 100
+        newWeights[idx] += delta;
+        // redistribuir a redução nos outros proporcionalmente
+        const others = newWeights.reduce((sum, w, i) => (i !== idx ? sum + w : sum), 0);
+        if (others > 0) {
+            const factor = (100 - newWeights[idx]) / others;
+            for (let i = 0; i < newWeights.length; i++) {
+                if (i !== idx) newWeights[i] *= factor;
+            }
+        }
+        // calcular pontuações com esses pesos
+        const tempScores = {};
+        terrains.forEach(t => {
+            let total = 0;
+            criteria.forEach((crit, i) => {
+                total += (newWeights[i] / 100) * (scores[crit.id][t.id] || 0);
+            });
+            tempScores[t.id] = total;
+        });
+        datasets.push({
+            label: `${c.name} +10%`,
+            data: terrains.map(t => tempScores[t.id]),
+            backgroundColor: colors[idx % colors.length] + '80'
+        });
+        
+        // -10% (ou mínimo 0)
+        const newWeights2 = criteria.map(crit => crit.weight);
+        const delta2 = Math.min(10, newWeights2[idx]);
+        newWeights2[idx] -= delta2;
+        const others2 = newWeights2.reduce((sum, w, i) => (i !== idx ? sum + w : sum), 0);
+        if (others2 > 0) {
+            const factor = (100 - newWeights2[idx]) / others2;
+            for (let i = 0; i < newWeights2.length; i++) {
+                if (i !== idx) newWeights2[i] *= factor;
+            }
+        }
+        const tempScores2 = {};
+        terrains.forEach(t => {
+            let total = 0;
+            criteria.forEach((crit, i) => {
+                total += (newWeights2[i] / 100) * (scores[crit.id][t.id] || 0);
+            });
+            tempScores2[t.id] = total;
+        });
+        datasets.push({
+            label: `${c.name} -10%`,
+            data: terrains.map(t => tempScores2[t.id]),
+            backgroundColor: colors[idx % colors.length] + '40'
+        });
+    });
+    
+    new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { position: 'top', labels: { boxWidth: 12 } }
+            },
+            scales: { y: { beginAtZero: true, max: 10 } }
+        }
+    });
+}
+
+// Botão para análise de sensibilidade
+const sensitivityBtn = document.createElement('button');
+sensitivityBtn.id = 'sensitivity-analysis';
+sensitivityBtn.className = 'btn btn-secondary';
+sensitivityBtn.innerHTML = '<i data-feather="trending-up"></i> Sensibilidade';
+sensitivityBtn.addEventListener('click', sensitivityAnalysis);
+exportDiv.appendChild(sensitivityBtn);
+refreshFeather();
+
+// ============================================
+// Mapa: calcular distância até ponto de interesse
+// ============================================
+function setupDistanceCalculation() {
+    if (!map) {
+        alert('Ative a aba Mapa primeiro.');
+        return;
+    }
+    
+    // Perguntar qual critério de distância usar
+    const distanceCriteria = criteria.filter(c => 
+        c.norm.mode === 'raw' && 
+        (c.name.toLowerCase().includes('distância') || c.name.toLowerCase().includes('km'))
+    );
+    
+    if (distanceCriteria.length === 0) {
+        alert('Nenhum critério de distância encontrado. Adicione um (ex: Distância fornecedores).');
+        return;
+    }
+    
+    let selectedCriterion = distanceCriteria[0];
+    if (distanceCriteria.length > 1) {
+        const names = distanceCriteria.map(c => c.name).join('\n');
+        const idx = prompt(`Múltiplos critérios de distância encontrados. Digite o número do critério desejado:\n${distanceCriteria.map((c, i) => `${i+1}: ${c.name}`).join('\n')}`);
+        if (idx) {
+            const index = parseInt(idx) - 1;
+            if (index >= 0 && index < distanceCriteria.length) selectedCriterion = distanceCriteria[index];
+        }
+    }
+    
+    alert('Clique no mapa para selecionar o ponto de interesse (fornecedor, centro, etc.)');
+    
+    const clickHandler = async (e) => {
+        const { lat, lng } = e.latlng;
+        
+        // Calcular distância de cada terreno até este ponto
+        const R = 6371; // km
+        terrains.forEach(t => {
+            const dLat = (t.lat - lat) * Math.PI / 180;
+            const dLon = (t.lng - lng) * Math.PI / 180;
+            const a = 
+                Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(t.lat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) * 
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const distance = R * c;
+            
+            rawValues[selectedCriterion.id][t.id] = Math.round(distance * 10) / 10;
+        });
+        
+        recalcNorm(selectedCriterion.id);
+        renderScoresTable();
+        updateChartsAndRanking();
+        
+        // Adicionar marcador do ponto de interesse
+        L.marker([lat, lng]).addTo(map)
+            .bindPopup('Ponto de interesse')
+            .openPopup();
+        
+        map.off('click', clickHandler);
+        alert('Distâncias calculadas e preenchidas!');
+    };
+    
+    map.on('click', clickHandler);
+}
+
+// Botão no mapa para calcular distância
+const calcDistanceBtn = document.createElement('button');
+calcDistanceBtn.id = 'calc-distance';
+calcDistanceBtn.className = 'btn btn-secondary';
+calcDistanceBtn.innerHTML = '<i data-feather="target"></i> Calcular distância';
+calcDistanceBtn.addEventListener('click', setupDistanceCalculation);
+document.querySelector('.map-controls').appendChild(calcDistanceBtn);
+refreshFeather();
+
+// ============================================
+// PDF com gráficos
+// ============================================
+async function exportToPDFWithCharts() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4');
+    
+    doc.setFontSize(18);
+    doc.text('Avaliação de Terrenos - PonderaCivil', 20, 20);
+    doc.setFontSize(10);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, 20, 30);
+    
+    let y = 40;
+    doc.setFontSize(12);
+    doc.text('Critérios e Pesos:', 20, y);
+    y += 8;
+    criteria.forEach(c => {
+        doc.text(`${c.name}: ${c.weight}%`, 25, y);
+        y += 6;
+    });
+    
+    y += 10;
+    doc.text('Notas atribuídas (0-10):', 20, y);
+    y += 8;
+    
+    const head = [['Critério', ...terrains.map(t => t.name)]];
+    const body = criteria.map(c => [c.name, ...terrains.map(t => (scores[c.id][t.id] || 0).toFixed(1))]);
+    
+    doc.autoTable({
+        startY: y,
+        head: head,
+        body: body,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [59, 130, 246] }
+    });
+    
+    const final = calculateFinalScores();
+    y = doc.lastAutoTable.finalY + 10;
+    doc.text('Pontuação final:', 20, y);
+    y += 6;
+    terrains.forEach(t => {
+        doc.text(`${t.name}: ${final[t.id].score.toFixed(2)}`, 25, y);
+        y += 6;
+    });
+    
+    // Capturar gráficos
+    const barCanvas = document.getElementById('bar-chart');
+    const radarCanvas = document.getElementById('radar-chart');
+    
+    if (barCanvas && radarCanvas) {
+        const barImg = await html2canvas(barCanvas);
+        const radarImg = await html2canvas(radarCanvas);
+        
+        doc.addPage();
+        doc.text('Gráfico de Barras', 20, 20);
+        doc.addImage(barImg.toDataURL('image/png'), 'PNG', 20, 30, 170, 80);
+        
+        doc.addPage();
+        doc.text('Gráfico Radar', 20, 20);
+        doc.addImage(radarImg.toDataURL('image/png'), 'PNG', 20, 30, 170, 80);
+    }
+    
+    doc.save('terrenos_analise_completa.pdf');
+}
+
+// Substituir o exportador antigo pelo novo
+exportPdfBtn.removeEventListener('click', exportToPDF);
+exportPdfBtn.addEventListener('click', exportToPDFWithCharts);
 exportPdfBtn.addEventListener('click', exportToPDF);
 exportXlsxBtn.addEventListener('click', exportToXLSX);
 
