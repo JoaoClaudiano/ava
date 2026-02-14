@@ -12,9 +12,9 @@ let criteria = [
 ];
 
 let terrains = [
-    { id: 't0', name: 'Terreno A' },
-    { id: 't1', name: 'Terreno B' },
-    { id: 't2', name: 'Terreno C' }
+    { id: 't0', name: 'Terreno A', lat: -23.5505, lng: -46.6333 }, // São Paulo
+    { id: 't1', name: 'Terreno B', lat: -22.9068, lng: -43.1729 }, // Rio de Janeiro
+    { id: 't2', name: 'Terreno C', lat: -19.9167, lng: -43.9345 }  // Belo Horizonte
 ];
 
 // Notas calculadas (0-10)
@@ -30,10 +30,12 @@ function initData() {
         scores[c.id] = {};
         rawValues[c.id] = {};
         terrains.forEach(t => {
-            // Valores iniciais
             if (c.norm.mode === 'raw') {
-                rawValues[c.id][t.id] = 0;
-                scores[c.id][t.id] = 5; // temporário, será recalculado
+                // Valores iniciais para exemplos
+                if (c.id === 'c0') rawValues[c.id][t.id] = 1500; // preço
+                else if (c.id === 'c1') rawValues[c.id][t.id] = 500; // área
+                else rawValues[c.id][t.id] = 0;
+                scores[c.id][t.id] = 5; // temporário
             } else {
                 scores[c.id][t.id] = 5;
                 rawValues[c.id][t.id] = 0;
@@ -57,13 +59,44 @@ const scoresTbody = document.getElementById('scores-tbody');
 const rankingListDiv = document.getElementById('ranking-list');
 const addCriterionBtn = document.getElementById('add-criterion');
 const addTerrainBtn = document.getElementById('add-terrain');
+const addDistanceSupplierBtn = document.getElementById('add-distance-supplier');
+const addDistanceUrbanBtn = document.getElementById('add-distance-urban');
+const addAccessBtn = document.getElementById('add-access');
 const exportPdfBtn = document.getElementById('export-pdf');
 const exportXlsxBtn = document.getElementById('export-xlsx');
 const weightWarning = document.getElementById('weight-warning');
 const startTourBtn = document.getElementById('start-tour');
 
+// Abas
+const tabLearn = document.getElementById('tab-learn');
+const tabSimulator = document.getElementById('tab-simulator');
+const tabMap = document.getElementById('tab-map');
+const tabExamples = document.getElementById('tab-examples');
+const learnContent = document.getElementById('learn-content');
+const simulatorContent = document.getElementById('simulator-content');
+const mapContent = document.getElementById('map-content');
+const examplesContent = document.getElementById('examples-content');
+
+// Botões de exemplo
+const loadExample1Btn = document.getElementById('load-example-1');
+const loadExample2Btn = document.getElementById('load-example-2');
+
+// Elementos do mapa
+const addressSearch = document.getElementById('address-search');
+const searchBtn = document.getElementById('search-btn');
+const measureBtn = document.getElementById('measure-distance');
+const clearBtn = document.getElementById('clear-measurements');
+const distanceInfo = document.getElementById('distance-info');
+const distanceValue = document.getElementById('distance-value');
+
 // Gráficos
 let barChart, radarChart;
+
+// Variáveis do mapa
+let map;
+let markers = [];
+let drawnItems;
+let measuringMode = false;
 
 // ============================================
 // Utilitários
@@ -77,17 +110,55 @@ function refreshFeather() {
 }
 
 // ============================================
+// Gerenciamento de abas
+// ============================================
+function activateTab(tabId) {
+    [tabLearn, tabSimulator, tabMap, tabExamples].forEach(t => t.classList.remove('active'));
+    [learnContent, simulatorContent, mapContent, examplesContent].forEach(c => c.classList.remove('active'));
+
+    if (tabId === 'learn') {
+        tabLearn.classList.add('active');
+        learnContent.classList.add('active');
+    } else if (tabId === 'simulator') {
+        tabSimulator.classList.add('active');
+        simulatorContent.classList.add('active');
+        setTimeout(() => {
+            updateChartsAndRanking();
+            refreshFeather();
+        }, 100);
+    } else if (tabId === 'map') {
+        tabMap.classList.add('active');
+        mapContent.classList.add('active');
+        setTimeout(() => {
+            if (!map) initMap();
+            else updateMapMarkers();
+        }, 200);
+    } else if (tabId === 'examples') {
+        tabExamples.classList.add('active');
+        examplesContent.classList.add('active');
+    }
+    refreshFeather();
+}
+
+tabLearn.addEventListener('click', () => activateTab('learn'));
+tabSimulator.addEventListener('click', () => activateTab('simulator'));
+tabMap.addEventListener('click', () => activateTab('map'));
+tabExamples.addEventListener('click', () => activateTab('examples'));
+
+// ============================================
 // Tour interativo
 // ============================================
 if (startTourBtn) {
     startTourBtn.addEventListener('click', () => {
         introJs().setOptions({
             steps: [
-                { title: 'Avaliação de Terrenos', intro: 'Ferramenta para comparar terrenos usando o método da pontuação ponderada.' },
+                { title: 'Bem-vindo', intro: 'Ferramenta para comparar terrenos usando o método da pontuação ponderada.' },
                 { element: '#terrains-list', title: 'Terrenos', intro: 'Adicione ou remova terrenos. Clique no lápis para editar o nome.' },
-                { element: '#criteria-list', title: 'Critérios', intro: 'Critérios pré-definidos. Use os botões para escolher: nota manual, menor melhor (↓) ou maior melhor (↑).' },
-                { element: '.scores-panel', title: 'Tabela', intro: 'Para critérios manuais, insira notas de 0 a 10. Para valores brutos, insira o valor real (ex: preço) – a nota é calculada automaticamente.' },
-                { element: '.results-panel', title: 'Resultados', intro: 'Compare as pontuações e exporte relatórios.' }
+                { element: '.manager-panel .btn-group', title: 'Critérios sugeridos', intro: 'Além de criar critérios personalizados, use estes botões para adicionar rapidamente distâncias e acesso, já configurados com normalização automática.' },
+                { element: '#criteria-list', title: 'Critérios', intro: 'Cada critério tem botões para escolher o modo: manual (✏️), menor melhor (↓) ou maior melhor (↑).' },
+                { element: '.scores-panel', title: 'Tabela', intro: 'Para critérios manuais, insira notas 0-10. Para valores brutos (preço, distância), insira o valor real – a nota é calculada automaticamente.' },
+                { element: '.results-panel', title: 'Resultados', intro: 'Compare as pontuações e exporte relatórios.' },
+                { element: '#tab-map', title: 'Mapa', intro: 'Visualize os terrenos no mapa, clique nos marcadores para ver detalhes e meça distâncias.' }
             ],
             showProgress: true,
             exitOnOverlayClick: true
@@ -165,7 +236,6 @@ function renderCriteria() {
             const crit = criteria.find(c => c.id === id);
             if (crit) {
                 crit.norm = { mode: 'manual' };
-                // Inicializa scores manuais se necessário
                 terrains.forEach(t => {
                     if (scores[crit.id][t.id] === undefined) scores[crit.id][t.id] = 5;
                 });
@@ -263,6 +333,7 @@ function renderTerrains() {
                 nameSpan.innerText = newName;
                 renderScoresTable();
                 updateChartsAndRanking();
+                if (map) updateMapMarkers();
                 refreshFeather();
             };
             input.addEventListener('blur', save);
@@ -280,6 +351,7 @@ function renderTerrains() {
                 delete rawValues[c.id][id];
             });
             updateAll();
+            if (map) updateMapMarkers();
         });
     });
 
@@ -287,7 +359,7 @@ function renderTerrains() {
 }
 
 // ============================================
-// Adicionar critério/terreno
+// Adicionar critérios (personalizados e sugeridos)
 // ============================================
 function addCriterion() {
     const name = prompt('Nome do novo critério:');
@@ -303,18 +375,82 @@ function addCriterion() {
     updateAll();
 }
 
+addCriterionBtn.addEventListener('click', addCriterion);
+
+addDistanceSupplierBtn.addEventListener('click', () => {
+    const newId = generateId('c');
+    criteria.push({
+        id: newId,
+        name: 'Distância fornecedores (km)',
+        weight: 10,
+        norm: { mode: 'raw', direction: 'lower' }
+    });
+    scores[newId] = {};
+    rawValues[newId] = {};
+    terrains.forEach(t => {
+        rawValues[newId][t.id] = 0;
+        scores[newId][t.id] = 5;
+    });
+    recalcNorm(newId);
+    updateAll();
+});
+
+addDistanceUrbanBtn.addEventListener('click', () => {
+    const newId = generateId('c');
+    criteria.push({
+        id: newId,
+        name: 'Distância centros urbanos (km)',
+        weight: 10,
+        norm: { mode: 'raw', direction: 'lower' }
+    });
+    scores[newId] = {};
+    rawValues[newId] = {};
+    terrains.forEach(t => {
+        rawValues[newId][t.id] = 0;
+        scores[newId][t.id] = 5;
+    });
+    recalcNorm(newId);
+    updateAll();
+});
+
+addAccessBtn.addEventListener('click', () => {
+    const newId = generateId('c');
+    criteria.push({
+        id: newId,
+        name: 'Acesso a vias principais',
+        weight: 10,
+        norm: { mode: 'manual' }
+    });
+    scores[newId] = {};
+    rawValues[newId] = {};
+    terrains.forEach(t => {
+        scores[newId][t.id] = 5;
+        rawValues[newId][t.id] = 0;
+    });
+    updateAll();
+});
+
+// ============================================
+// Adicionar terreno
+// ============================================
 function addTerrain() {
     const name = prompt('Nome do novo terreno:');
     if (!name) return;
     const newId = generateId('t');
-    terrains.push({ id: newId, name: name });
+    // Gerar coordenadas aleatórias próximas ao centro do Brasil para exemplo
+    const lat = -14.2350 + (Math.random() - 0.5) * 10;
+    const lng = -51.9253 + (Math.random() - 0.5) * 10;
+    terrains.push({ id: newId, name: name, lat: lat, lng: lng });
     criteria.forEach(c => {
         scores[c.id][newId] = 5;
         rawValues[c.id][newId] = 0;
         if (c.norm.mode === 'raw') recalcNorm(c.id);
     });
     updateAll();
+    if (map) updateMapMarkers();
 }
+
+addTerrainBtn.addEventListener('click', addTerrain);
 
 // ============================================
 // Validação de pesos
@@ -494,7 +630,186 @@ function updateAll() {
     renderTerrains();
     renderScoresTable();
     updateChartsAndRanking();
+    if (map) updateMapMarkers();
 }
+
+// ============================================
+// Funções do mapa
+// ============================================
+function initMap() {
+    if (map) return;
+    
+    map = L.map('map-container').setView([-14.2350, -51.9253], 4);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+    
+    drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+    
+    const drawControl = new L.Control.Draw({
+        draw: {
+            polyline: {
+                metric: true,
+                feet: false,
+                icon: new L.DivIcon({ iconSize: [8, 8], className: 'leaflet-div-icon leaflet-editing-icon' })
+            },
+            polygon: false,
+            rectangle: false,
+            circle: false,
+            marker: true
+        },
+        edit: { featureGroup: drawnItems, remove: true }
+    });
+    map.addControl(drawControl);
+    
+    updateMapMarkers();
+    
+    map.on(L.Draw.Event.CREATED, function(event) {
+        const layer = event.layer;
+        drawnItems.addLayer(layer);
+        
+        if (measuringMode && event.layerType === 'polyline') {
+            const latlngs = layer.getLatLngs();
+            let total = 0;
+            for (let i = 0; i < latlngs.length - 1; i++) {
+                total += latlngs[i].distanceTo(latlngs[i + 1]);
+            }
+            distanceValue.textContent = `Distância total: ${(total / 1000).toFixed(2)} km`;
+            distanceInfo.classList.remove('hidden');
+        }
+    });
+    
+    measureBtn.addEventListener('click', () => {
+        measuringMode = true;
+        alert('Clique no mapa para iniciar a linha. Duplo clique para finalizar.');
+    });
+    
+    clearBtn.addEventListener('click', () => {
+        drawnItems.clearLayers();
+        distanceInfo.classList.add('hidden');
+        measuringMode = false;
+    });
+    
+    searchBtn.addEventListener('click', async () => {
+        const query = addressSearch.value;
+        if (!query) return;
+        try {
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            if (data && data.length > 0) {
+                const result = data[0];
+                const lat = parseFloat(result.lat);
+                const lon = parseFloat(result.lon);
+                map.setView([lat, lon], 12);
+                L.marker([lat, lon]).addTo(map).bindPopup(`<b>${result.display_name}</b>`).openPopup();
+            } else alert('Endereço não encontrado');
+        } catch (error) {
+            console.error(error);
+            alert('Erro na busca');
+        }
+    });
+}
+
+function updateMapMarkers() {
+    if (!map) return;
+    
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+    
+    const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+    const finalScores = calculateFinalScores();
+    
+    terrains.forEach((t, idx) => {
+        let popup = `<b>${t.name}</b><br>`;
+        popup += `<b>Pontuação final: ${finalScores[t.id].score.toFixed(2)}</b><br><hr>`;
+        criteria.forEach(c => {
+            const score = scores[c.id][t.id] || 5;
+            popup += `${c.name}: ${score.toFixed(1)}/10<br>`;
+        });
+        
+        const marker = L.marker([t.lat, t.lng], {
+            icon: L.divIcon({
+                className: 'custom-marker',
+                html: `<div style="background-color: ${colors[idx % colors.length]}; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.2);"></div>`,
+                iconSize: [24, 24],
+                popupAnchor: [0, -12]
+            })
+        }).bindPopup(popup);
+        
+        marker.addTo(map);
+        markers.push(marker);
+    });
+}
+
+// ============================================
+// Exemplos práticos
+// ============================================
+function loadExample1() {
+    criteria = [
+        { id: 'c0', name: 'Preço (R$)', weight: 50, norm: { mode: 'raw', direction: 'lower' } },
+        { id: 'c1', name: 'Localização', weight: 30, norm: { mode: 'manual' } },
+        { id: 'c2', name: 'Topografia', weight: 20, norm: { mode: 'manual' } }
+    ];
+    terrains = [
+        { id: 't0', name: 'A', lat: -23.55, lng: -46.63 },
+        { id: 't1', name: 'B', lat: -22.90, lng: -43.17 }
+    ];
+    scores = {}; rawValues = {};
+    criteria.forEach(c => {
+        scores[c.id] = {};
+        rawValues[c.id] = {};
+        terrains.forEach(t => {
+            if (c.id === 'c0') {
+                rawValues[c.id][t.id] = (t.id === 't0') ? 1300 : 1700;
+            } else if (c.id === 'c1') {
+                scores[c.id][t.id] = (t.id === 't0') ? 8 : 9;
+            } else {
+                scores[c.id][t.id] = (t.id === 't0') ? 7 : 6;
+            }
+        });
+    });
+    recalcNorm('c0');
+    activateTab('simulator');
+    updateAll();
+}
+
+function loadExample2() {
+    criteria = [
+        { id: 'c0', name: 'Preço (R$)', weight: 30, norm: { mode: 'raw', direction: 'lower' } },
+        { id: 'c1', name: 'Dist. fornecedores (km)', weight: 25, norm: { mode: 'raw', direction: 'lower' } },
+        { id: 'c2', name: 'Dist. centros (km)', weight: 25, norm: { mode: 'raw', direction: 'lower' } },
+        { id: 'c3', name: 'Acesso vias', weight: 20, norm: { mode: 'manual' } }
+    ];
+    terrains = [
+        { id: 't0', name: 'Alpha', lat: -23.55, lng: -46.63 },
+        { id: 't1', name: 'Beta', lat: -22.90, lng: -43.17 },
+        { id: 't2', name: 'Gamma', lat: -19.91, lng: -43.93 }
+    ];
+    scores = {}; rawValues = {};
+    criteria.forEach(c => {
+        scores[c.id] = {};
+        rawValues[c.id] = {};
+        terrains.forEach(t => {
+            if (c.id === 'c0') {
+                rawValues[c.id][t.id] = (t.id === 't0') ? 1500 : (t.id === 't1' ? 1800 : 1300);
+            } else if (c.id === 'c1') {
+                rawValues[c.id][t.id] = (t.id === 't0') ? 12 : (t.id === 't1' ? 25 : 8);
+            } else if (c.id === 'c2') {
+                rawValues[c.id][t.id] = (t.id === 't0') ? 5 : (t.id === 't1' ? 30 : 15);
+            } else {
+                scores[c.id][t.id] = (t.id === 't0') ? 8 : (t.id === 't1' ? 5 : 7);
+            }
+        });
+    });
+    criteria.forEach(c => { if (c.norm.mode === 'raw') recalcNorm(c.id); });
+    activateTab('simulator');
+    updateAll();
+}
+
+loadExample1Btn.addEventListener('click', loadExample1);
+loadExample2Btn.addEventListener('click', loadExample2);
 
 // ============================================
 // Exportações
@@ -528,7 +843,6 @@ async function exportToPDF() {
 
 function exportToXLSX() {
     const wb = XLSX.utils.book_new();
-
     const criteriaSheet = [['Critério', 'Peso (%)', 'Modo']];
     criteria.forEach(c => {
         let modo = 'Manual';
@@ -536,27 +850,24 @@ function exportToXLSX() {
         criteriaSheet.push([c.name, c.weight, modo]);
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(criteriaSheet), 'Critérios');
-
+    
     const notesSheet = [['Critério', ...terrains.map(t => t.name)]];
     criteria.forEach(c => notesSheet.push([c.name, ...terrains.map(t => (scores[c.id][t.id] || 0).toFixed(1))]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(notesSheet), 'Notas');
-
+    
     const final = calculateFinalScores();
     const finalSheet = [['Terreno', 'Pontuação']];
     terrains.forEach(t => finalSheet.push([t.name, final[t.id].score]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(finalSheet), 'Resultado');
-
+    
     XLSX.writeFile(wb, 'terrenos_analise.xlsx');
 }
 
-// ============================================
-// Event listeners
-// ============================================
-addCriterionBtn.addEventListener('click', addCriterion);
-addTerrainBtn.addEventListener('click', addTerrain);
 exportPdfBtn.addEventListener('click', exportToPDF);
 exportXlsxBtn.addEventListener('click', exportToXLSX);
 
+// ============================================
 // Inicialização
+// ============================================
 updateAll();
 refreshFeather();
