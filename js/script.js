@@ -97,6 +97,7 @@ let map;
 let markers = [];
 let drawnItems;
 let measuringMode = false;
+
 // ============================================
 // Sistema de notificações (toasts)
 // ============================================
@@ -132,9 +133,6 @@ function showToast(message, type = 'info', duration = 3000) {
         setTimeout(() => toast.remove(), 300);
     }, duration);
 }
-
-// Substituir alerts existentes
-// Exemplo: onde tem alert('...'), substituir por showToast('...', 'success/info/error')
 
 // ============================================
 // Importação CSV
@@ -262,7 +260,6 @@ importCsvBtn.innerHTML = '<i data-feather="upload-cloud"></i> Importar CSV';
 importCsvBtn.addEventListener('click', importCSV);
 document.querySelector('.export-buttons').appendChild(importCsvBtn);
 
-
 // ============================================
 // Gráfico de contribuição (barras empilhadas)
 // ============================================
@@ -331,7 +328,6 @@ contribBtn.addEventListener('click', () => {
     document.getElementById('contribution-chart').scrollIntoView({ behavior: 'smooth' });
 });
 document.querySelector('.export-buttons').appendChild(contribBtn);
-
 
 // ============================================
 // Links compartilháveis
@@ -403,7 +399,6 @@ shareBtn.innerHTML = '<i data-feather="share-2"></i> Compartilhar';
 shareBtn.addEventListener('click', shareSimulation);
 document.querySelector('.export-buttons').appendChild(shareBtn);
 
-
 // ============================================
 // Exportar/importar JSON
 // ============================================
@@ -465,7 +460,6 @@ importJsonBtn.addEventListener('click', importJSON);
 
 document.querySelector('.export-buttons').appendChild(exportJsonBtn);
 document.querySelector('.export-buttons').appendChild(importJsonBtn);
-
 
 // ============================================
 // Utilitários
@@ -1052,7 +1046,7 @@ function initMap() {
     
     measureBtn.addEventListener('click', () => {
         measuringMode = true;
-        alert('Clique no mapa para iniciar a linha. Duplo clique para finalizar.');
+        showToast('Clique no mapa para iniciar a linha. Duplo clique para finalizar.', 'info', 4000);
     });
     
     clearBtn.addEventListener('click', () => {
@@ -1073,10 +1067,12 @@ function initMap() {
                 const lon = parseFloat(result.lon);
                 map.setView([lat, lon], 12);
                 L.marker([lat, lon]).addTo(map).bindPopup(`<b>${result.display_name}</b>`).openPopup();
-            } else alert('Endereço não encontrado');
+            } else {
+                showToast('Endereço não encontrado', 'error');
+            }
         } catch (error) {
             console.error(error);
-            alert('Erro na busca');
+            showToast('Erro na busca', 'error');
         }
     });
 }
@@ -1181,57 +1177,6 @@ loadExample1Btn.addEventListener('click', loadExample1);
 loadExample2Btn.addEventListener('click', loadExample2);
 
 // ============================================
-// Exportações
-// ============================================
-async function exportToPDF() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.text('Avaliação de Terrenos - PonderaCivil', 20, 20);
-    doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, 20, 30);
-    let y = 40;
-    doc.text('Critérios e Pesos:', 20, y);
-    y += 8;
-    criteria.forEach(c => {
-        doc.text(`${c.name}: ${c.weight}%`, 25, y);
-        y += 6;
-    });
-    y += 10;
-    const head = [['Critério', ...terrains.map(t => t.name)]];
-    const body = criteria.map(c => [c.name, ...terrains.map(t => (scores[c.id][t.id] || 0).toFixed(1))]);
-    doc.autoTable({ startY: y, head, body, theme: 'grid' });
-    const final = calculateFinalScores();
-    y = doc.lastAutoTable.finalY + 10;
-    doc.text('Pontuação final:', 20, y);
-    y += 6;
-    terrains.forEach(t => {
-        doc.text(`${t.name}: ${final[t.id].score.toFixed(2)}`, 25, y);
-        y += 6;
-    });
-    doc.save('terrenos_analise.pdf');
-}
-
-function exportToXLSX() {
-    const wb = XLSX.utils.book_new();
-    const criteriaSheet = [['Critério', 'Peso (%)', 'Modo']];
-    criteria.forEach(c => {
-        let modo = 'Manual';
-        if (c.norm.mode === 'raw') modo = c.norm.direction === 'lower' ? 'Menor melhor' : 'Maior melhor';
-        criteriaSheet.push([c.name, c.weight, modo]);
-    });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(criteriaSheet), 'Critérios');
-    
-    const notesSheet = [['Critério', ...terrains.map(t => t.name)]];
-    criteria.forEach(c => notesSheet.push([c.name, ...terrains.map(t => (scores[c.id][t.id] || 0).toFixed(1))]));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(notesSheet), 'Notas');
-    
-    const final = calculateFinalScores();
-    const finalSheet = [['Terreno', 'Pontuação']];
-    terrains.forEach(t => finalSheet.push([t.name, final[t.id].score]));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(finalSheet), 'Resultado');
-    
-    XLSX.writeFile(wb, 'terrenos_analise.xlsx');
-}
-// ============================================
 // Persistência com localStorage
 // ============================================
 function saveSimulation() {
@@ -1242,13 +1187,13 @@ function saveSimulation() {
         rawValues: rawValues
     };
     localStorage.setItem('ponderaCivilState', JSON.stringify(state));
-    alert('Simulação salva com sucesso!');
+    showToast('Simulação salva com sucesso!', 'success');
 }
 
 function loadSimulation() {
     const saved = localStorage.getItem('ponderaCivilState');
     if (!saved) {
-        alert('Nenhuma simulação salva encontrada.');
+        showToast('Nenhuma simulação salva encontrada.', 'error');
         return;
     }
     try {
@@ -1259,13 +1204,13 @@ function loadSimulation() {
         rawValues = state.rawValues;
         updateAll();
         if (map) updateMapMarkers();
-        alert('Simulação carregada!');
+        showToast('Simulação carregada!', 'success');
     } catch (e) {
-        alert('Erro ao carregar simulação.');
+        showToast('Erro ao carregar simulação.', 'error');
     }
 }
 
-// Adicionar botões na interface (no results-panel, próximo aos botões de exportação)
+// Adicionar botões na interface
 const saveBtn = document.createElement('button');
 saveBtn.id = 'save-simulation';
 saveBtn.className = 'btn btn-secondary';
@@ -1281,14 +1226,13 @@ loadBtn.addEventListener('click', loadSimulation);
 const exportDiv = document.querySelector('.export-buttons');
 exportDiv.appendChild(saveBtn);
 exportDiv.appendChild(loadBtn);
-refreshFeather();
 
 // ============================================
 // Análise de sensibilidade
 // ============================================
 function sensitivityAnalysis() {
     if (criteria.length === 0) {
-        alert('Adicione pelo menos um critério.');
+        showToast('Adicione pelo menos um critério.', 'error');
         return;
     }
     // Criar modal simples
@@ -1432,7 +1376,7 @@ refreshFeather();
 // ============================================
 function setupDistanceCalculation() {
     if (!map) {
-        alert('Ative a aba Mapa primeiro.');
+        showToast('Ative a aba Mapa primeiro.', 'error');
         return;
     }
     
@@ -1443,7 +1387,7 @@ function setupDistanceCalculation() {
     );
     
     if (distanceCriteria.length === 0) {
-        alert('Nenhum critério de distância encontrado. Adicione um (ex: Distância fornecedores).');
+        showToast('Nenhum critério de distância encontrado. Adicione um (ex: Distância fornecedores).', 'error');
         return;
     }
     
@@ -1457,7 +1401,7 @@ function setupDistanceCalculation() {
         }
     }
     
-    alert('Clique no mapa para selecionar o ponto de interesse (fornecedor, centro, etc.)');
+    showToast('Clique no mapa para selecionar o ponto de interesse (fornecedor, centro, etc.)', 'info', 4000);
     
     const clickHandler = async (e) => {
         const { lat, lng } = e.latlng;
@@ -1487,7 +1431,7 @@ function setupDistanceCalculation() {
             .openPopup();
         
         map.off('click', clickHandler);
-        alert('Distâncias calculadas e preenchidas!');
+        showToast('Distâncias calculadas e preenchidas!', 'success');
     };
     
     map.on('click', clickHandler);
@@ -1571,7 +1515,6 @@ async function exportToPDFWithCharts() {
 // Substituir o exportador antigo pelo novo
 exportPdfBtn.removeEventListener('click', exportToPDF);
 exportPdfBtn.addEventListener('click', exportToPDFWithCharts);
-exportPdfBtn.addEventListener('click', exportToPDF);
 exportXlsxBtn.addEventListener('click', exportToXLSX);
 
 // ============================================
